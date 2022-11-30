@@ -1,0 +1,871 @@
+Select 
+ACTL_NUM as ENRLL_NUM,
+ACTL_PLND_FLG as ACTL_PLND_FLG,
+CMNTS,
+CMNT_ENTRD,
+ENRLLMNT_TYP,
+STUDY_NUM,
+CNTRY_CD,
+SITE_NUM,
+SRC_SYS_NM,
+LEVEL_TYPE,
+RECORD_FROM,
+RECORD_TO,
+EXTRNL_UNIQ_ID
+from (--Entered Screening--
+SELECT ENTERED_SCR AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+AS EXTRNL_UNIQ_ID
+FROM (SELECT y.site_id,
+         COUNT (DISTINCT x.subj_id) AS ENTERED_SCR,
+         MAX (x.record_From) AS record_From
+    FROM ls_tb_subj_mlstn x, ls_tb_subj y, 
+	(SELECT  subj_id , MAX (record_from) AS record_from
+                           FROM ls_tb_subj_mlstn 
+                          WHERE SRC_SYS_ID=2 --and (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+                           group by subj_id) z 
+   WHERE     x.subj_id = y.subj_id
+   and x.subj_id=z.subj_id
+         AND x.src_Sys_id = 2
+         AND x.actv_flg = 'Y'
+         AND x.is_deleted = 'N'
+         AND y.actv_flg = 'Y'
+         AND y.src_sys_id = 2
+         AND y.is_deleted = 'N'
+         AND y.subj_actv_flg = 'Y'
+GROUP BY y.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+WHERE site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+and site.is_Deleted = 'N'
+and stdy.is_deleted = 'N'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3100'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+--Entred Treatment--
+SELECT ENTERED_TREATMENT AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+AS EXTRNL_UNIQ_ID
+FROM (select b.site_id ,nvl(a.ENTERED_TREATMENT,0) as ENTERED_TREATMENT ,b.record_from
+from (SELECT SUBJ.SITE_ID,COUNT (DISTINCT subj.subj_id) AS ENTERED_TREATMENT
+FROM ECDP_ODS.ls_tb_subj subj,
+ECDP_ODS.ls_tb_subj_mlstn subj_mls
+WHERE subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj_mls.actv_flg = 'Y'
+AND subj.is_deleted = 'N'
+and subj_mls.is_deleted = 'N'
+AND SUBJ.SUBJ_ID = SUBJ_MLS.SUBJ_ID
+AND subj.src_sys_id = 2 and subj_mls.src_sys_id = 2
+AND (SUBJ_MLS.SUBJ_MIN_DOSE_DT IS NOT NULL or SUBJ_MLS.SUBJ_RNDMIZATION_DT IS NOT NULL)
+/*New logic to execlude subjects with screen failure status having minimum dosage date eCDP 11.0 */
+AND SUBJ.SUBJ_ID NOT IN (SELECT DISTINCT SUBJ.SUBJ_ID AS SUBJ_ID
+            FROM ECDP_ODS.ls_tb_subj subj, ECDP_ODS.ls_tb_subj_mlstn subj_mls
+           WHERE     subj.actv_flg = 'Y'
+                 AND subj.subj_actv_flg = 'Y'
+                 AND subj_mls.actv_flg = 'Y'
+                 AND subj.is_deleted = 'N'
+                 AND subj_mls.is_deleted = 'N'
+                 AND SUBJ.SUBJ_ID = SUBJ_MLS.SUBJ_ID
+                 AND subj.src_sys_id = 2
+                 AND subj_mls.src_sys_id = 2
+                 AND (    SUBJ_MLS.SUBJ_MIN_DOSE_DT IS NOT NULL
+                      AND UPPER (SUBJ.SUBJ_STTS) = 'SCREEN FAILURE'))
+                GROUP BY SUBJ.SITE_ID) a,
+               (
+  SELECT subj.site_id AS site_id,
+         subj.study_id AS study_id,
+         MAX (subj.record_from) record_from
+    FROM ls_tb_subj subj,
+         (  SELECT subj_id
+              FROM ls_tb_subj_mlstn
+            -- WHERE (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+          GROUP BY subj_id) subj_mlstn
+   WHERE subj.src_sys_id = 2 AND subj.subj_id = subj_mlstn.subj_id
+GROUP BY site_id, study_id
+UNION
+  SELECT site_id AS site_id,
+         study_id AS study_id,
+         MAX (record_from) AS record_from
+    FROM ls_tb_subj
+   WHERE     src_sys_id = 2
+         --AND (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+GROUP BY site_id, study_id) b
+where a.site_id(+)=b.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+WHERE site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+and site.is_Deleted = 'N'
+and stdy.is_deleted = 'N'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3200'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+--Completed TreatemenT--
+SELECT Completed_Treatment AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+AS EXTRNL_UNIQ_ID
+FROM(select site_id , sum (Completed_Treatment) as Completed_Treatment, MAX (record_from) AS record_from from (
+select b.site_id ,nvl(a.Completed_Treatment,0) as Completed_Treatment ,b.record_from
+from(SELECT site_id,COUNT (DISTINCT subj_id) AS Completed_Treatment
+FROM ECDP_ODS.ls_tb_subj subj
+WHERE subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj.is_deleted = 'N'
+and nvl (subj.SUBJ_TRTMNT_WTHDRWL_FLG,'Default') !='Y'                 
+AND subj.src_sys_id = 2
+AND (   LTRIM (RTRIM (UPPER (subj_stts))) =('COMPLETE')
+OR LTRIM (RTRIM (UPPER (subj_stts))) = 'SURVIVAL'
+OR LTRIM (RTRIM (UPPER (subj_stts))) ='FOLLOW-UP')
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                       WHERE  src_sys_id = 2 --and (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+					   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id
+            union all       
+                   select b.site_id ,nvl(a.Completed_Treatment,0) as Completed_Treatment ,b.record_from
+from(SELECT subj.site_id,COUNT (DISTINCT subj.subj_id) AS Completed_Treatment
+FROM ECDP_ODS.ls_tb_subj subj  
+WHERE     subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj.actv_flg = 'Y'
+AND subj.is_deleted = 'N'
+and nvl (subj.SUBJ_TRTMNT_WTHDRWL_FLG,'Default') !='Y'                 
+AND src_sys_id = 2
+AND LTRIM (RTRIM (UPPER (subj_stts))) IN ('EXTENSION')
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 
+                   --and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+                   and study_id in (select study_id 
+                                    from ls_tb_study  
+                                    where src_sys_id=99 
+                                    and actv_flg='Y' 
+                                    and EXTNS_STDY_PRTCL_NMBR is not null and upper(EXTNS_STDY_PRTCL_NMBR) != 'N/A')
+                   GROUP BY site_id,study_id
+                   ) b
+where a.site_id(+)=b.site_id
+) group by site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+and site.is_Deleted = 'N'
+and stdy.is_deleted = 'N'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'      
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3300' 
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+--Completed Trial--
+SELECT Completed_trial AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+AS EXTRNL_UNIQ_ID
+FROM (select site_id , sum (Completed_trial) as Completed_trial, MAX (record_from) AS record_from from (
+select b.site_id ,nvl(a.Completed_trial,0) as Completed_trial ,b.record_from
+from (SELECT subj.site_id,COUNT (DISTINCT subj.subj_id) AS Completed_trial
+FROM ECDP_ODS.ls_tb_subj subj
+WHERE     subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj.actv_flg = 'Y'
+AND subj.is_deleted = 'N'                 
+AND src_sys_id = 2
+AND LTRIM (RTRIM (UPPER (subj_stts))) IN ('COMPLETE','SURVIVAL')
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 
+                   --and (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+                   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id
+union all
+select b.site_id ,nvl(a.Completed_trial,0) as Completed_trial ,b.record_from
+from(SELECT subj.site_id,COUNT (DISTINCT subj.subj_id) AS Completed_trial
+FROM ECDP_ODS.ls_tb_subj subj
+WHERE     subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj.actv_flg = 'Y'
+AND subj.is_deleted = 'N'                 
+AND src_sys_id = 2
+AND LTRIM (RTRIM (UPPER (subj_stts))) IN ('EXTENSION')
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 
+                  -- and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+                   and study_id in (select study_id 
+                                    from ls_tb_study  
+                                    where src_sys_id=99 
+                                    and actv_flg='Y' 
+                                    and EXTNS_STDY_PRTCL_NMBR is not null and upper(EXTNS_STDY_PRTCL_NMBR) != 'N/A')
+                   GROUP BY site_id,study_id
+                   ) b
+where a.site_id(+)=b.site_id
+)group by site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+and site.is_Deleted = 'N'
+and stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3400'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE' 
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+--Completed Followup--
+SELECT Completed_followup AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+AS EXTRNL_UNIQ_ID
+FROM(select b.site_id ,nvl(a.Completed_followup,0) as Completed_followup ,b.record_from
+from(SELECT subj.site_id,COUNT (DISTINCT subj.subj_id) AS Completed_followup
+FROM ECDP_ODS.ls_tb_subj subj
+WHERE subj.actv_flg = 'Y'
+AND subj.subj_actv_flg = 'Y'
+AND subj.is_deleted = 'N'                 
+AND src_sys_id = 2
+AND LTRIM (RTRIM (UPPER (subj_stts))) IN ('COMPLETE','SURVIVAL')
+AND subj.subj_id IN (SELECT DISTINCT subj_id
+FROM ECDP_ODS.ls_tb_subj subj
+WHERE LTRIM (RTRIM (UPPER (subj_stts))) IN ('FOLLOW-UP')
+AND src_sys_id = 2)
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+WHERE site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+and site.is_Deleted = 'N'
+and stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3500' 
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE' 
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL 
+--No of Enrolled-- 
+SELECT NO_OF_ENROLLED AS ACTL_NUM,
+enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+NULL AS CMNTS,
+0 AS CMNT_ENTRD,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+stdy.src_study_id AS STUDY_NUM,
+cntry.CNTRY_2_CD AS CNTRY_CD,
+site.SITE_NUM AS SITE_NUM,
+enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+'$$SITE' AS LEVEL_TYPE,
+subj_site.RECORD_FROM AS RECORD_FROM,
+TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+'$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.NO_OF_ENROLLED,0) as NO_OF_ENROLLED ,b.record_from
+  from(SELECT subj.site_id,                 
+                 COUNT (DISTINCT subj_id) AS NO_OF_ENROLLED
+            FROM ECDP_ODS.ls_tb_subj subj
+           WHERE     subj.actv_flg = 'Y'
+          AND subj.subj_actv_flg = 'Y'
+          AND subj.is_deleted = 'N'                 
+          AND src_sys_id = 2
+          AND LTRIM (RTRIM (UPPER (subj_stts))) NOT IN ('SCREEN FAILURE','SCREENED')
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  
+                   (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+                   GROUP BY site_id,study_id) b
+        where a.site_id(+)=b.site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3600'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- No of Enrolled -- 
+SELECT NO_OF_ENROLLED AS ACTL_NUM,
+       enrll_bridge.ACTL_PLND_FLG AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.NO_OF_ENROLLED,0) as NO_OF_ENROLLED ,b.record_from
+  from(SELECT ptnt.site_id,COUNT (DISTINCT PTNT.PTNT_UNQ_NO) AS NO_OF_ENROLLED
+            FROM ECDP_ODS.LS_TB_PTNT ptnt
+           WHERE     ptnt.actv_flg = 'Y'
+    AND is_deleted = 'N'                 
+          AND LTRIM (RTRIM (UPPER (ptnt.RECORD_STATUS__C))) = 'ACTIVE'
+                GROUP BY ptnt.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ECDP_ODS.LS_TB_PTNT
+                   WHERE  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+        where a.site_id(+)=b.site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '3600'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$ECDP_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- Entered Followup -- 
+SELECT ENTERED_FOLLOWUP AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM(select b.site_id ,nvl(a.ENTERED_FOLLOWUP,0) as ENTERED_FOLLOWUP ,b.record_from
+  from(Select SUBJ.SITE_ID, count(distinct SUBJ.subj_id) as ENTERED_FOLLOWUP from ECDP_ODS.ls_tb_subj subj
+where subj.actv_flg = 'Y'  and subj.is_deleted = 'N' and subj.subj_actv_flg = 'Y'  AND src_sys_id = 2
+and ltrim(rtrim(upper(subj.subj_stts))) = 'FOLLOW-UP'
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge       
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))      
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0001'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- Dropped Screening -- 
+SELECT Dropped_Screening AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM(select b.site_id ,nvl(a.Dropped_Screening,0) as Dropped_Screening ,b.record_from
+  from(Select SUBJ.SITE_ID, count(distinct subj_id)  as Dropped_Screening from ECDP_ODS.ls_tb_subj subj
+where subj.actv_flg = 'Y' and subj.subj_actv_flg = 'Y' 
+AND subj.is_deleted = 'N' AND src_sys_id = 2
+and ltrim(rtrim(upper(subj.subj_stts))) = 'SCREEN FAILURE'
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge       
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))       
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0002'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- DRPD_TRTMNT_OTHER -- 
+SELECT DRPD_TRTMNT_OTHER AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.DRPD_TRTMNT_OTHER,0) as DRPD_TRTMNT_OTHER ,b.record_from
+  from(Select SUBJ.SITE_ID, count(distinct subj_id) as DRPD_TRTMNT_OTHER from ECDP_ODS.ls_tb_subj subj
+where ltrim(rtrim(upper(subj_stts))) in ('EARLY TERMINATION') and subj.actv_flg = 'Y' and subj.subj_actv_flg = 'Y'
+AND subj.is_deleted = 'N' AND src_sys_id = 2 
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge          
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id 
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))      
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0003'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- DRPD_FLWUP -- 
+SELECT DRPD_FLWUP AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.DRPD_FLWUP,0) as DRPD_FLWUP ,b.record_from
+  from(Select subj.site_id, count(distinct subj_id) as DRPD_FLWUP
+from ECDP_ODS.ls_tb_subj subj  
+where subj.subj_actv_flg = 'Y' AND subj.is_deleted = 'N'
+and ltrim(rtrim(upper(subj_stts))) in ('EARLY TERMINATION') and subj.actv_flg = 'Y' 
+AND src_sys_id = 2
+and subj.subj_id in (Select distinct subj_id from ECDP_ODS.ls_tb_subj where ltrim(rtrim(upper(subj_stts))) in ('FOLLOW-UP')
+AND src_sys_id = 2)
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE  src_sys_id = 2 and (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge        
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))       
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0004'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- CURR_IN_TRTMNT -- 
+SELECT CURR_IN_TRTMNT AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE', 'MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.CURR_IN_TRTMNT,0) as CURR_IN_TRTMNT ,b.record_from
+  from(Select subj.site_id,  count(distinct subj.subj_id) as CURR_IN_TRTMNT   
+from ECDP_ODS.ls_tb_subj subj  
+Where subj.subj_actv_flg = 'Y' and subj.actv_flg = 'Y' 
+AND subj.is_deleted = 'N' and ltrim(rtrim(upper(subj_stts))) not in ('SCREEN FAILURE','EARLY TERMINATION','COMPLETE','FOLLOW-UP')  
+AND src_sys_id = 2
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE  src_sys_id = 2 and (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id)SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry ,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge      
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE))) =
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))      
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y'
+AND site.is_Deleted = 'N'
+AND stdy.is_deleted = 'N'
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0005'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N')
+UNION ALL
+-- entered_trial -- 
+      SELECT entered_trial AS ACTL_NUM,
+       'A' AS ACTL_PLND_FLG,
+       NULL AS CMNTS,
+       0 AS CMNT_ENTRD,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP,
+       stdy.src_study_id AS STUDY_NUM,
+       cntry.CNTRY_2_CD AS CNTRY_CD,
+       site.SITE_NUM AS SITE_NUM,
+       enrll_bridge.level_src_sys_nm AS SRC_SYS_NM,
+       '$$SITE' AS LEVEL_TYPE,
+       subj_site.RECORD_FROM AS RECORD_FROM,
+       TO_DATE ('$$MAX_DATE','MM/DD/YYYY HH24:MI:SS') AS RECORD_TO,
+       enrll_bridge.ENRLMNT_NUM AS ENRLLMNT_TYP_NUM,
+          '$$SITE'
+|| '|'
+|| enrll_bridge.ENRLMNT_NUM
+|| '|'
+|| stdy.src_study_id
+|| '|'
+|| SITE.site_num
+          AS EXTRNL_UNIQ_ID
+  FROM (select b.site_id ,nvl(a.entered_trial,0) as entered_trial ,b.record_from
+  from(Select subj.site_id,  count(distinct subj_id)  as entered_trial   
+from ECDP_ODS.ls_tb_subj subj  
+Where subj.actv_flg = 'Y' and  subj.subj_actv_flg = 'Y'   AND subj.is_deleted = 'N'
+AND src_sys_id = 2 
+                GROUP BY SUBJ.SITE_ID) a,
+               (  SELECT site_id AS site_id,study_id as study_id, MAX (record_from) AS record_from
+                    FROM ls_tb_subj
+                   WHERE src_sys_id = 2 and  (INSRT_PRCS_EXECT_ID = $$BATCH_ID OR UPDT_PRCS_EXECT_ID = $$BATCH_ID)
+				   GROUP BY site_id,study_id) b
+where a.site_id(+)=b.site_id) SUBJ_SITE,
+ECDP_ODS.ls_tb_site site,
+ECDP_ODS.LS_tb_Study stdy,
+ECDP_ODS.ls_tb_cntry cntry,
+ECDP_ODS.LS_TB_ENRLMNT_BRIDGE enrll_bridge        
+ WHERE     site.site_id = SUBJ_SITE.site_id
+AND stdy.study_id = site.study_id
+AND site.cntry_id = cntry.cntry_id
+AND LTRIM (RTRIM (UPPER (enrll_bridge.ENRLMNT_RULE)))=
+LTRIM (RTRIM (UPPER (stdy.ENROLLMENT_RULESET)))      
+AND site.src_sys_id = '99'
+AND site.actv_flg = 'Y'
+AND LTRIM (RTRIM (UPPER (site.site_stts))) <> 'CANCELLED'
+AND stdy.src_sys_id = '99'
+AND stdy.actv_flg = 'Y'
+AND cntry.actv_flg = 'Y' 
+AND enrll_bridge.ROLLUP_REQ_FLG = 'Y'
+AND enrll_bridge.ACTL_PLND_FLG = 'A'
+AND enrll_bridge.ENRLMNT_NUM = '0006'
+AND enrll_bridge.ROLLUP_src_sys_nm='$$RAVE_SITE'
+AND stdy.src_study_id NOT IN (SELECT DISTINCT SRC_STUDY_ID FROM ECDP_ODS.LS_TB_STUDY_STATUS_CHECK
+WHERE ACCEPT_DATA = 'N'))
